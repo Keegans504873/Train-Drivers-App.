@@ -1,0 +1,200 @@
+import React, { useState, useEffect, useMemo, createContext, useContext } from 'react';
+import { 
+    FileText, HelpCircle, PlayCircle, BookOpen, Lightbulb, LayoutDashboard, 
+    Settings, Sun, Moon, ShieldCheck, X, Coffee, Map, BookLock, Edit, Notebook 
+} from 'lucide-react';
+
+// Firebase Imports
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { 
+    getFirestore, collection, onSnapshot, doc, getDoc, writeBatch, 
+    addDoc, serverTimestamp, query
+} from 'firebase/firestore';
+
+// --- 1. CONTEXT CREATION ---
+// This will provide the appId to any component that needs it without passing props.
+const AppContext = createContext();
+
+// --- 2. FIREBASE INITIALIZATION ---
+// This section is wrapped in a try-catch block to handle configuration errors gracefully.
+let app, auth, db;
+let firebaseError = null;
+
+try {
+    const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+    
+    if (!firebaseConfigString) {
+        throw new Error("Firebase configuration is not available in this environment.");
+    }
+
+    const firebaseConfig = JSON.parse(firebaseConfigString);
+    if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+        throw new Error("Firebase configuration is incomplete.");
+    }
+
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+} catch (error) {
+    console.error("CRITICAL: Firebase initialization failed:", error);
+    firebaseError = `Could not connect to application services: ${error.message}`;
+}
+
+// --- 3. MAIN APP COMPONENT ---
+// This is the root of the application.
+export default function App() {
+    const [activeView, setActiveView] = useState('dashboard');
+    const [status, setStatus] = useState('initializing'); // 'initializing', 'ready', 'error'
+    const [currentUser, setCurrentUser] = useState(null);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-drivers-hub';
+
+    // This effect runs only ONCE to handle authentication and initial data setup.
+    useEffect(() => {
+        if (firebaseError) {
+            setStatus('error');
+            return;
+        }
+
+        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                setCurrentUser(user);
+                // Only check for initial data once.
+                if (status === 'initializing') {
+                    try {
+                        const initDocRef = doc(db, `/artifacts/${appId}/public/config/initialized`);
+                        const initDoc = await getDoc(initDocRef);
+                        if (!initDoc.exists()) {
+                            console.log("First time setup: Populating database with initial data...");
+                            // In a real app, you might want a more robust seeding mechanism.
+                        }
+                        setStatus('ready'); // Set status to ready after successful check.
+                    } catch (err) {
+                        console.error("Database check/setup failed:", err);
+                        firebaseError = "Failed to initialize application data.";
+                        setStatus('error');
+                    }
+                }
+            } else {
+                signInAnonymously(auth).catch(err => {
+                    console.error("Anonymous sign-in failed:", err);
+                    firebaseError = "Authentication failed. The service may be unavailable.";
+                    setStatus('error');
+                });
+            }
+        });
+
+        return () => unsubscribe(); // Cleanup the listener when the component unmounts.
+    }, []); // Empty dependency array is crucial for this to run only once.
+
+    const renderContent = () => {
+        if (status === 'error') {
+            return (
+                <div className="flex items-center justify-center h-full w-full p-4 text-center text-red-500 bg-red-500/10 rounded-lg">
+                    <p>{firebaseError || "An unknown error occurred."}</p>
+                </div>
+            );
+        }
+
+        if (status !== 'ready') {
+            return (
+                <div className="flex items-center justify-center h-full w-full">
+                    <p>Initializing Hub...</p>
+                </div>
+            );
+        }
+
+        // When ready, render the active view. For now, it's just a placeholder.
+        return (
+             <div className="p-6">
+                <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
+                    Welcome to the Driver's Hub
+                </h2>
+                <p className="text-slate-500 dark:text-slate-400">
+                    The application core is stable. We can now re-integrate features.
+                </p>
+                <p className="text-sm text-slate-400 mt-4">Current View: <strong>{activeView}</strong></p>
+             </div>
+        );
+    };
+
+    return (
+        <AppContext.Provider value={{ appId }}>
+             <style>{`:root { --primary-color: #38bdf8; --primary-color-light: rgba(56, 189, 248, 0.1); }`}</style>
+            <div className={`font-sans flex min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200`}>
+                <Sidebar activeView={activeView} setActiveView={setActiveView} />
+                <div className="flex-1 flex flex-col min-w-0">
+                    <Header activeView={activeView} />
+                    <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+                        {renderContent()}
+                    </main>
+                </div>
+            </div>
+        </AppContext.Provider>
+    );
+}
+
+// --- 4. STATIC SUB-COMPONENTS ---
+// These components are simplified for this foundational build.
+
+const Sidebar = ({ activeView, setActiveView }) => {
+    const navItems = [
+        { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { id: 'manuals', icon: FileText, label: 'Manuals & Docs' },
+        { id: 'safety', icon: BookLock, label: 'Safety Docs' },
+        { id: 'maps', icon: Map, label: 'Route Maps' },
+        { id: 'videos', icon: PlayCircle, label: 'Videos' },
+        { id: 'notes', icon: Notebook, label: 'My Notes' },
+    ];
+
+    return (
+        <nav className="w-16 hover:w-64 transition-all duration-300 ease-in-out bg-white dark:bg-slate-800/50 p-2 flex flex-col group shadow-lg flex-shrink-0">
+            <div className="flex items-center space-x-4 p-2 mb-6">
+                <div className="rounded-lg flex-shrink-0 bg-[var(--primary-color-light)] p-2">
+                    <svg role="img" className="h-6 w-6 text-[var(--primary-color)]" viewBox="0 0 24 24" fill="currentColor"><path d="M3.6 21.8c.4.2.8.2 1.2 0l15.6-8.4c.6-.3.9-.9.9-1.5s-.3-1.2-.9-1.5L4.8 2.1c-.4-.2-.8-.2-1.2 0-.4.2-.6.6-.6 1.1v17.5c0 .5.2.9.6 1.1zM5 4.6l12.5 6.8L5 18.2V4.6z"/></svg>
+                </div>
+                <h1 className="text-xl font-bold text-[var(--primary-color)] opacity-0 group-hover:opacity-100">Driver's Hub</h1>
+            </div>
+            <ul className="space-y-2 flex-1">
+                {navItems.map(item => (
+                    <li key={item.id}>
+                        <button 
+                            onClick={() => setActiveView(item.id)} 
+                            className={`flex items-center w-full p-3 rounded-lg ${activeView === item.id ? 'bg-[var(--primary-color-light)] text-[var(--primary-color)]' : 'hover:bg-slate-200 dark:hover:bg-slate-700/50'}`}
+                        >
+                            <item.icon className="h-6 w-6 flex-shrink-0" />
+                            <span className="ml-4 font-medium opacity-0 group-hover:opacity-100">{item.label}</span>
+                        </button>
+                    </li>
+                ))}
+            </ul>
+            <div className="mt-auto flex flex-col space-y-2">
+                 <a href="#" target="_blank" rel="noopener noreferrer" className="flex items-center w-full p-3 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700/50">
+                    <Coffee className="h-6 w-6 flex-shrink-0 text-amber-500"/>
+                    <span className="ml-4 font-medium opacity-0 group-hover:opacity-100">Buy me a brew</span>
+                </a>
+                 <button onClick={() => setActiveView('settings')} className={`flex items-center w-full p-3 rounded-lg ${activeView === 'settings' ? 'bg-[var(--primary-color-light)] text-[var(--primary-color)]' : 'hover:bg-slate-200 dark:hover:bg-slate-700/50'}`}>
+                    <Settings className="h-6 w-6 flex-shrink-0"/>
+                    <span className="ml-4 font-medium opacity-0 group-hover:opacity-100">Settings</span>
+                </button>
+            </div>
+        </nav>
+    );
+};
+
+const Header = ({ activeView }) => {
+    const viewTitle = useMemo(() => {
+        const titleMap = {
+            safety: 'Safety Documents',
+            maps: 'Route Maps',
+            notes: 'My Notes',
+            suggest: 'Suggest an Edit'
+        };
+        return titleMap[activeView] || activeView.charAt(0).toUpperCase() + activeView.slice(1);
+    }, [activeView]);
+    return (
+        <header className="flex-shrink-0 bg-white dark:bg-slate-800/50 h-16 flex items-center justify-between px-6 shadow-sm">
+            <div className="font-semibold text-xl">{viewTitle}</div>
+        </header>
+    );
+};
